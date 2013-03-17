@@ -1,0 +1,5 @@
+name = Percolate Integration
+description = Provides the ability to ingest content from percolate.
+package = Percolate Integration
+core = 7.x
+configure = admin/config/content/percolate
