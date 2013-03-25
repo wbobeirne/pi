@@ -39,6 +39,13 @@ class Percolate_Api {
   /* Users */
   /*********/
   
+  /**
+   * Gets a user by their Percolate user ID.
+   *
+   * @param int $user_id - Percolate user ID.
+   *
+   * @return array
+   */
   public function getUser($user_id) {
     return $this->executeMethod('users/' . $user_id);
   }
@@ -48,15 +55,33 @@ class Percolate_Api {
   /* Posts */
   /*********/
   
-  
+  /**
+   * Gets a single post by post id.
+   *
+   * @param int $post_id - Percolate post ID.
+   *
+   * @return array
+   */
   public function getPost($post_id) {
     $results = $this->executeMethod('posts/' . $post_id);
   }
   
-  public function getUserPosts($user_id, $limit) {
-    return $this->executeMethod('users/' . $user_id . '/posts', array(
-      'limit' => $limit,
-    ));
+  /**
+   * Gets a list of a user's posts.
+   *
+   * @param int $user_id - Percolate user ID.
+   * @param array $options - Array of options for filtering / sorting:
+   *    - limit:    The number of posts to return. Defaults to 10.
+   *    - offset:   Number of posts to offset by. Defaults to 0.
+   *    - order_by: What to order the posts by. 'points' or 'release_at'.
+   *                Prepend with '-' to reverse. Defaults to 'release_at'.
+   *
+   *    More available in the percolate API docs.
+   *
+   * @return array
+   */
+  public function getUserPosts($user_id, $options) {
+    return $this->executeMethod('users/' . $user_id . '/posts', $options);
   }
   
   

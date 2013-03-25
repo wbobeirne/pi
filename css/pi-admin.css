@@ -1,0 +1,9 @@
+.user-mapping .form-item {
+  float: left;
+  width: 48%;
+  margin-right: 2%;
+}
+
+.user-mapping .form-item:last-child {
+  padding-right: none;
+}

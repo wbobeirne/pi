@@ -1,0 +1,7 @@
+name = Percolate Integration Import
+description = Provides a form to import content from Percolate.
+package = Percolate Integration
+core = 7.x
+configure = admin/content/percolate
+
+dependencies[] = pi
