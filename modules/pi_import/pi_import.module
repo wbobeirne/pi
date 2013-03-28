@@ -337,15 +337,9 @@ function pi_get_content_type_fields($content_type) {
   return $fields;
 }
 
-
-
-
-/********/
-/* AJAX */
-/********/
-
-
-
+/**
+ * AJAX callback that replaces the mappings table with the content type's fields
+ */
 function pi_import_form_content_type_ajax($form, &$form_state) {
   $default = pi_import_settings();
   return pi_import_build_field_mappings_table($form_state['values']['content_type'], $default);

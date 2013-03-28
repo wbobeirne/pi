@@ -51,6 +51,13 @@ function pi_permission() {
  * @param boolean $key - API key, optional
  */
 function pi_build_api($key = FALSE) {
+  // Ensure cURL is available.
+  if (!function_exists('curl_version')) {
+    $message = t('cURL must be installed in order to connect with the Percolate API.');
+    pi_error($message, 'error');
+    return FALSE;
+  }
+  
   $key = $key ? $key : variable_get('pi_api_key', FALSE);
   if ($key) {
     try {
@@ -61,20 +68,16 @@ function pi_build_api($key = FALSE) {
       $message = t('Percolate API could not be built. Error: !e', array(
         '!e' => (string)$e,
       ));
-      $severity = 'error';
+      pi_error($message, 'error');
     }
   }
   else {
     $message = t('Percolate Integration requires an API key to be set before being used. You can do so !here.', array(
       '!here' => l('admin/config/content/percolate'),
     ));
-    $severity = 'warning';
+    pi_error($message, 'warning');
   }
   
-  if ($error_message) {
-    drupal_set_message($message, $severity);
-    watchdog('Percolate Integration', $message);
-  }
   return FALSE;
 }
 
@@ -204,13 +207,16 @@ function pi_user_mapping_form_validate($form, &$form_state) {
  */
 function pi_get_percolate_user($uid) {
   $api = pi_build_api();
-  try {
-    $user = $api->getUser($uid);
-    return $user;
+  if ($api) {
+    try {
+      $user = $api->getUser($uid);
+      return $user;
+    }
+    catch (Percolate_Exception $e) {
+      watchdog('Percolate Integration', 'User could not be retrieved from Percolate. Error: ' . (string)$e);
+    }
   }
-  catch (Percolate_Exception $e) {
-    return FALSE;
-  }
+  return FALSE;
 }
 
 /**
@@ -237,7 +243,6 @@ function pi_user_mapping_form_add_more($form, &$form_state) {
  * AJAX add more callback.
  */
 function pi_user_mapping_form_add_more_ajax($form, &$form_state) {
-  watchdog('test', 'test');
   return $form['pi_user_mapping'];
 }
 
@@ -335,4 +340,12 @@ function pi_mark_mapping_deleted($entity_type, $entity_id) {
 function pi_entity_delete($entity, $type) {
   list($id) = entity_extract_ids($type, $entity);
   pi_mark_mapping_deleted($type, $id);
+}
+
+/**
+ * Set message and watchdog the same message.
+ */
+function pi_error($message, $severity = 'message') {
+  drupal_set_message($message, $severity);
+  watchdog('Percolate Integration', $message);
 }
