@@ -3,6 +3,7 @@
 define('PI_IMPORT_TYPE_USER', 1);
 define('PI_IMPORT_TYPE_GROUP', 2);
 define('PI_IMPORT_SETTINGS', 'pi_import_defaults');
+define('PI_IMPORT_DEFAULT_FREQUENCY', 3600);
 
 
 /**
@@ -17,6 +18,15 @@ function pi_import_menu() {
     'access arguments' => array('percolate import'),
   );
   
+  $items['admin/config/content/percolate/import'] = array(
+    'title' => 'Import settings',
+    'type' => MENU_LOCAL_TASK,
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('pi_import_settings_form'),
+    'access arguments' => array('configure percolate import'),
+    'weight' => 10,
+  );
+  
   return $items;
 }
 
@@ -29,6 +39,10 @@ function pi_import_permission() {
     'percolate import' => array(
       'title' => t('Import content from Percolate'),
       'description' => t('Gives user access to the import content from percolate form.'),
+    ),
+    'configure percolate import' => array(
+      'title' => t('Configure percolate import settings'),
+      'description' => t('Allows user to configure percolate import settings at admin/config/content/percolate/import'),
     ),
   );
 }
@@ -132,6 +146,8 @@ function pi_import_form($form, &$form_state) {
     ),
   );
   
+  $form['#attached']['css'][] = drupal_get_path('module', 'pi_import') . '/css/pi_import.css';
+  
   return $form;
 }
 
@@ -177,6 +193,7 @@ function pi_import_build_field_mappings_table($content_type, $default) {
       '!here' => l('here', 'admin/config/content/percolate/users'),
     )),
     '#tree' => TRUE,
+    '#required' => TRUE,
     '#suffix' => '</div>',
   );
   
@@ -188,9 +205,9 @@ function pi_import_build_field_mappings_table($content_type, $default) {
       $value = isset($default['field_mappings'][$content_type][$name]) ? $default['field_mappings'][$content_type][$name] : 0;
       $form[$content_type][$name] = array(
         '#type' => 'select',
-        '#title' => '<div class="label">' . $field['label'] . '</div>',
+        '#title' => $field['label'],
         '#options' => pi_get_field_post_field_options($field, $post_fields),
-        '#required' => isset($field['required']) ? $field['required'] : FALSE,
+        '#required' => empty($field['required']) ? FALSE : TRUE,
         '#default_value' => $value,
         '#empty_option' => '- None -',
         '#empty_value' => 0,
@@ -347,6 +364,50 @@ function pi_import_form_content_type_ajax($form, &$form_state) {
 
 
 
+/**
+ * Page callback for admin/config/content/percolate/import. Provides settings
+ * form for imports. 
+ */
+function pi_import_settings_form($form, &$form_state) {
+  $form['pi_import_automatic_import'] = array(
+    '#type' => 'checkbox',
+    '#title' => t('Automatically import content from Percolate.'),
+    '#description' => t('Check this to import content automatically from Percolate using the settings configured at the !form.', array(
+      '!form' => l('import form', 'admin/content/percolate'),
+    )),
+    '#default_value' => variable_get('pi_import_automatic_import', FALSE),
+  );
+  
+  $cron_threshold = variable_get('cron_safe_threshold', DRUPAL_CRON_DEFAULT_THRESHOLD) / 60;
+  $form['pi_import_threshold'] = array(
+    '#title' => t('Import frequency'),
+    '#description' => t('Import can no more often than cron, which has been configured to run every ' . $cron_threshold . ' minutes.'),
+    '#type' => 'textfield',
+    '#size' => 5,
+    '#field_prefix' => 'Import every',
+    '#default_value' => variable_get('pi_import_threshold', PI_IMPORT_DEFAULT_FREQUENCY) / 60,
+    '#field_suffix' => 'minutes',
+  );
+  
+  $form['#validate'][] = 'pi_import_settings_form_validate';
+  
+  return system_settings_form($form);
+}
+
+
+/**
+ * Validate callback for pi_import_settings_form.
+ */
+function pi_import_settings_form_validate($form, &$form_state) {
+  if (is_numeric($form_state['values']['pi_import_threshold'])) {
+    $form_state['values']['pi_import_threshold'] *= 60;
+  }
+  else {
+    form_set_error('pi_import_threshold', t('Import frequency must be a number.'));
+  }
+}
+
+
 
 /**********/
 /* Import */
@@ -355,28 +416,35 @@ function pi_import_form_content_type_ajax($form, &$form_state) {
 /**
  * Submit callback for pi_import_form. Runs an import batch process.
  */
-function pi_import_form_import() {
+function pi_import_form_import($use_batch = TRUE) {
   $settings = pi_import_settings();
   $api = pi_build_api();
-  
-  if ($settings['content_type'] && $api) {
+
+  if ($settings['content_type'] && $settings['import_id'] && $api) {
     $posts = $api->getUserPosts($settings['import_id'], array(
       'limit' => $settings['import_count'],
     ));
-    $ops = array();
-    
-    foreach ($posts['data'] as $post) {
-      $ops[] = array('pi_import_import_post', array($post, $settings));
+
+    if ($use_batch) {
+      $ops = array();
+      foreach ($posts['data'] as $post) {
+        $ops[] = array('pi_import_import_post', array($post, $settings));
+      }
+      
+      $batch = array(
+        'operations' => $ops,
+        'finished' => 'pi_import_batch_finished',
+        'title' => t('Percolate Import'),
+        'init_message' => t('Retrieving posts from Percolate.'),
+        'progress_message' => t('Imported @current out of @total posts.'),
+      );
+      batch_set($batch);
     }
-    
-    $batch = array(
-      'operations' => $ops,
-      'finished' => 'pi_import_batch_finished',
-      'title' => t('Percolate Import'),
-      'init_message' => t('Retrieving posts from Percolate.'),
-      'progress_message' => t('Imported @current out of @total posts.'),
-    );
-    batch_set($batch);
+    else {
+      foreach ($posts['data'] as $post) {
+        pi_import_import_post($post, $settings);
+      }
+    }
   }
 }
 
@@ -449,14 +517,13 @@ function pi_import_import_post($post, $settings, &$context = array()) {
           case 'media':
             $media = pi_import_media($post);
             if ($media) {
-              $node->{$field_info['field_name']}[LANGUAGE_NONE][0] = (get_object_vars($media));
+              $node->{$field_info['field_name']}[LANGUAGE_NONE][0] = get_object_vars($media);
             }
             break;
             
           default:
             $node->{$field_info['field_name']}[LANGUAGE_NONE][0]['value'] = ($post[$post_field]);
             break;
-            
         }
       }
     }
@@ -475,10 +542,9 @@ function pi_import_media($post) {
   if (empty($post['media'])) {
     return FALSE;
   }
-  
+
   $url = $post['media']['images']['original']['url'];
   $id = $post['media']['id'];
-  $format = $post['media']['format'];
   
   $media_data = drupal_http_request($url);
   if (isset($media_data->error)) {
@@ -490,7 +556,10 @@ function pi_import_media($post) {
     drupal_set_message($msg, 'error');
     return FALSE;
   }
+  dpm($post['media']['src']);
   
+  // $post['media']['format'] is not reliable, get it straight from the url.
+  $format = array_pop(explode('.', $post['media']['src']));
   $dir = 'public://percolate_import';
   file_prepare_directory($dir, FILE_CREATE_DIRECTORY | FILE_MODIFY_PERMISSIONS);
   $file = file_save_data($media_data->data, $dir . '/' . $id . '.' . $format, FILE_EXISTS_REPLACE);
@@ -525,10 +594,10 @@ function pi_import_tags($post, $vocab, $create = TRUE) {
 
 
 /**
- * 
+ * Batch complete function. Let them know the results of the import.
  */
 function pi_import_batch_finished($success, $results, $ops) {
-  $message = t('Import completed! Of !total posts, !imported were imported, !drafts were still in the draft state, and !duplicates were duplicates.', array(
+  $message = t('!total posts checked. !imported posts were imported, !drafts posts were still in the draft state, and !duplicates posts have already been imported.', array(
     '!total' => $results['total'],
     '!imported' => $results['imported'],
     '!drafts' => $results['drafts'],
@@ -536,4 +605,20 @@ function pi_import_batch_finished($success, $results, $ops) {
   ));
   drupal_set_message($message);
   watchdog('Percolate Integration Import', $message);
+}
+
+
+
+/**
+ * Implements hook_cron().
+ */
+function pi_import_cron() {
+  if (variable_get('pi_import_automatic_import', FALSE)) {
+    $import_frequency = variable_get('pi_import_threshold', 0);
+    $last_import = variable_get('pi_import_last_import', 0);
+    if (time() > $import_frequency + $last_import) {
+      pi_import_form_import(FALSE);
+      variable_set('pi_import_last_import', time());
+    }
+  }
 }

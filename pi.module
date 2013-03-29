@@ -12,7 +12,8 @@ include_once('phpercolate/Api.php');
  */
 function pi_menu() {
   $items['admin/config/content/percolate'] = array(
-    'title' => t('Percolate Integration'),
+    'title' => t('Percolate integration'),
+    'description' => t('Configure Percolate Integration settings and user mappings.'),
     'page callback' => 'drupal_get_form',
     'page arguments' => array('pi_settings_form'),
     'access arguments' => array('configure pi'),
@@ -20,6 +21,7 @@ function pi_menu() {
   $items['admin/config/content/percolate/settings'] = array(
     'title' => t('Settings'),
     'type' => MENU_DEFAULT_LOCAL_TASK,
+    'weight' => -10,
   );
   
   $items['admin/config/content/percolate/users'] = array(
@@ -28,6 +30,7 @@ function pi_menu() {
     'page callback' => 'drupal_get_form',
     'page arguments' => array('pi_user_mapping_form'),
     'access arguments' => array('configure pi'),
+    'weight' => 5,
   );
   
   return $items;
