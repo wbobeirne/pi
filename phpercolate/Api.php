@@ -2,7 +2,7 @@
 
 require_once dirname(__FILE__) . '/Exception.php';
 
-class Percolate_Api {
+class PercolateApi {
   /**
    * The default endpoint URL for the percolate API.
    *
@@ -70,18 +70,36 @@ class Percolate_Api {
    * Gets a list of a user's posts.
    *
    * @param int $user_id - Percolate user ID.
-   * @param array $options - Array of options for filtering / sorting:
-   *    - limit:    The number of posts to return. Defaults to 10.
-   *    - offset:   Number of posts to offset by. Defaults to 0.
-   *    - order_by: What to order the posts by. 'points' or 'release_at'.
-   *                Prepend with '-' to reverse. Defaults to 'release_at'.
+   * @param array $options - Array of options for filtering / sorting. See
+   *    Percolate API docs for more information.
    *
-   *    More available in the percolate API docs.
+   * @return array - 'pagination' and 'data' indexes, 'data' contains the
+   *    posts, 'pagination' contains info about the query.
+   */
+  public function getUserPosts($user_id, $options = array()) {
+    return $this->executeMethod('users/' . $user_id . '/posts', $options);
+  }
+  
+  
+  /**********/
+  /* Groups */
+  /**********/
+  
+  /**
+   * Gets a list of users in a group.
+   *
+   * @param int $group_id - Group ID.
+   * @param array $options - Array of options for filtering / sorting. See the
+   *    Percolate API docs for more information.
    *
    * @return array
    */
-  public function getUserPosts($user_id, $options) {
-    return $this->executeMethod('users/' . $user_id . '/posts', $options);
+  public function getGroupUsers($group_id, $options = array()) {
+    if (!isset($options['limit'])) {
+      $options['limit'] = 9999; // Defaults to 10, and we want to get all.
+    }
+    $users = $this->executeMethod('groups/' . $group_id . '/users', $options);
+    return $users['data'];
   }
   
   
@@ -119,7 +137,7 @@ class Percolate_Api {
       return $results;
     }
     else {
-      throw new Percolate_Exception(curl_error($ch), curl_errno($ch), $url);
+      throw new PercolateException(curl_error($ch), curl_errno($ch), $url);
     }
   }
   

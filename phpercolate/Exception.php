@@ -1,6 +1,6 @@
 <?php
 
-class Percolate_Exception extends Exception {
+class PercolateException extends Exception {
   private $url;
 
   public function __construct($message, $code, $url) {
