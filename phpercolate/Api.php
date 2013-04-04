@@ -102,6 +102,20 @@ class PercolateApi {
     return $users['data'];
   }
   
+  /**
+   * Gets a list of posts made by users in a group.
+   *
+   * @param int   $group_id - Group ID.
+   * @param array $options - Array of options. See getUserPosts for more info.
+   *
+   * @return array
+   *
+   * @see getUserPosts
+   */
+  public function getGroupPosts($group_id, $options = array()) {
+    return $this->executeMethod('groups/' . $group_id . '/posts', $options);
+  }
+  
   
   /***********/
   /* Utility */
@@ -122,14 +136,20 @@ class PercolateApi {
   public function executeMethod($method, $params = array(), $type = 'GET') {
     $params['api_key'] = $this->key;
     $url = self::API_URL . $method;
-  
+    if ($type == 'GET') {
+      $url .= '?' . $this->arrayToParams($params);
+    }
+
     $ch = curl_init($url);
     curl_setopt($ch, CURLOPT_CUSTOMREQUEST, $type);
     curl_setopt($ch, CURLOPT_TIMEOUT, self::TIMEOUT);
-    curl_setopt($ch, CURLOPT_POSTFIELDS, $this->arrayToParams($params));
     curl_setopt($ch, CURLOPT_FAILONERROR, 1);
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-    
+
+    if ($type == 'POST') {
+      curl_setopt($ch, CURLOPT_POSTFIELDS, $params);
+    }
+
     $results = curl_exec($ch);
     if (curl_errno($ch) == 0) {
       curl_close($ch);
@@ -137,7 +157,12 @@ class PercolateApi {
       return $results;
     }
     else {
-      throw new PercolateException(curl_error($ch), curl_errno($ch), $url);
+      throw new PercolateException(
+        curl_error($ch),
+        curl_getinfo($ch, CURLINFO_HTTP_CODE),
+        $url,
+        curl_errno($ch)
+      );
     }
   }
   
@@ -151,7 +176,7 @@ class PercolateApi {
   private function arrayToParams($params) {
     $param_str = '';
     foreach ($params as $key => $value) {
-      $param_str .= $key . '=' . $value . '&'; 
+      $param_str .= $key . '=' . urlencode($value) . '&'; 
     }
     return $param_str;
   }

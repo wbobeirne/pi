@@ -2,10 +2,12 @@
 
 class PercolateException extends Exception {
   private $url;
+  private $curl_code;
 
-  public function __construct($message, $code, $url) {
+  public function __construct($message, $code, $url, $curl_code) {
     parent::__construct($message, $code);
     $this->url = $url;
+    $this->curl_code = $curl_code;
   }
   
   public function __toString() {
@@ -14,5 +16,9 @@ class PercolateException extends Exception {
   
   public function getUrl() {
     return $this->url;
+  }
+  
+  public function getCurlCode() {
+    return $this->curl_code;
   }
 }

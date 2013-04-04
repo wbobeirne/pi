@@ -4,6 +4,7 @@ define('PI_IMPORT_TYPE_USER', 1);
 define('PI_IMPORT_TYPE_GROUP', 2);
 define('PI_IMPORT_SETTINGS', 'pi_import_defaults');
 define('PI_IMPORT_DEFAULT_FREQUENCY', 3600);
+define('PI_IMPORT_POST_LIMIT', 20);
 
 include_once('pi_import.admin.inc');
 
@@ -60,62 +61,104 @@ function pi_import_form_import($use_batch = TRUE) {
   $api = pi_build_api();
 
   if ($settings['content_type'] && $settings['import_id'] && $api) {
-    $posts = pi_import_form_get_posts($api, $settings);
-    if (empty($posts)) {
-      return;
-    }
+    $ops = array();
+    $count = $settings['import_count'];
+    do {
+      $limit = $count < PI_IMPORT_POST_LIMIT ? $count : PI_IMPORT_POST_LIMIT;
+      $ops[] = array('pi_import_batch_operation', array($settings, $limit, count($ops) * PI_IMPORT_POST_LIMIT));
+      $count -= $limit;
+    } while ($count > 0);
 
     if ($use_batch) {
-      $ops = array();
-      foreach ($posts['data'] as $post) {
-        $ops[] = array('pi_import_import_post', array($post, $settings));
-      }
-      
       $batch = array(
         'operations' => $ops,
         'finished' => 'pi_import_batch_finished',
         'title' => t('Percolate Import'),
         'init_message' => t('Retrieving posts from Percolate.'),
-        'progress_message' => t('Imported @current out of @total posts.'),
       );
       batch_set($batch);
     }
     else {
-      foreach ($posts['data'] as $post) {
-        pi_import_import_post($post, $settings);
+      foreach ($ops as $op) {
+        call_user_func_array($op[0], $op[1]);
       }
     }
   }
 }
 
+/**
+ * Batch operation, pulls and imports posts in chunks.
+ */
+function pi_import_batch_operation($settings, $limit, $offset, &$context = array()) {
+  if (empty($context['import_count'])) {
+    $context['import_count'] = 0;
+  }
+
+
+  $posts = pi_import_get_posts($settings['import_type'], $settings['import_id'], $limit, $offset);
+  foreach ($posts as $post) {
+    pi_import_import_post($post, $settings, $context);
+  }
+
+  $context['import_count'] += count($posts);
+  $context['message'] = t('Imported !count of !total posts.', array(
+    '!count' => $context['results']['total'],
+    '!total' => $settings['import_count'],
+  ));
+}
 
 /**
- * Get list of posts based on the import form's settings.
+ * Gets posts form the Percolate API.
+ *
+ * @param int $type - Type to import. See constants.
+ * @param int $id - ID of type to import.
+ * @param int $limit - Number of posts to limit to.
+ * @param int $offset
+ *
+ * @return array - Array of posts.
  */
-function pi_import_form_get_posts($api, $settings) {
+function pi_import_get_posts($type, $id, $limit = 20, $offset = 0) {
+  $posts = array();
+  $api =  pi_build_api();
   try {
-    $users = array();
-    if ($settings['import_type'] == PI_IMPORT_TYPE_GROUP) {
-      $users = $api->getGroupUsers($settings['import_id']);
+    if ($type == PI_IMPORT_TYPE_USER) {
+      $posts = $api->getUserPosts($id, array(
+        'limit' => $limit,
+        'offset' => $offset,
+      ));
     }
     else {
-      $users[] = $api->getUser($settings['import_id']);
+      $posts = $api->getGroupPosts($id, array(
+        'limit' => $limit,
+        'offset' => $offset,
+      ));
     }
-    $posts = array();
-    foreach ($users as $user) {
-      $posts = array_merge($posts, $api->getUserPosts($user['id'], array(
-        'limit' => $settings['import_count'],
-      )));
-    }
-    return $posts;
   }
   catch (PercolateException $e) {
-    drupal_set_message(t('@type with an ID of %id does not exist.', array(
-      '@type' => $settings['import_type'] == PI_IMPORT_TYPE_USER ? 'User' : 'Group',
-      '%id' => $settings['import_id'],
-    )), 'error');
+    $code = $e->getCode();
+    $curlCode = $e->getCurlCode();
+    $message = '';
+    if ($code == 403) {
+      $message = 'Your API key does not have permission to access !type !id.';
+    }
+    elseif ($code == 404) {
+      $message = '!type with an ID of !id does not exist.';
+    }
+    elseif ($curlCode == 28) {
+      $message = 'Request timed out. Try lowering the number of posts to import.';
+    }
+
+    if ($message) {
+      drupal_set_message(t($message, array(
+        '!type' => $type == PI_IMPORT_TYPE_USER ? 'User' : 'Group',
+        '!id' => $id,
+      )), 'error');
+    }
+
     return array();
   }
+
+  return $posts['data'];
 }
 
 
@@ -130,17 +173,24 @@ function pi_import_import_post($post, $settings, &$context = array()) {
       'imported' => 0,
       'drafts' => 0,
       'duplicates' => 0,
+      'non_site' => 0,
       'total' => 0,
     );
   }
   $context['results']['total']++;
 
   // Don't import draft posts.
-  if (empty($post['published_to']) || !$post['published_to']['public']) {
+  if (!isset($post['published_to']['public'])) {
     $context['results']['drafts']++;
     return FALSE;
   }
-  
+
+  // Don't import posts that aren't meant for sites.
+  if (!$post['published_to']['public'] || empty($post['title'])) {
+    $context['results']['non_site']++;
+    return FALSE;
+  }
+
   // Don't import duplicates, unless deleted and configured that way.
   if ($post_mapping = pi_get_mappings_by_post($post['id'], 'node')) {
     $post_mapping = array_pop($post_mapping);
@@ -214,7 +264,7 @@ function pi_import_import_post($post, $settings, &$context = array()) {
  * Imports a media file from percolate. Returns file object.
  */
 function pi_import_media($post) {
-  if (empty($post['media'])) {
+  if (empty($post['media']) || $post['media']['type'] != 'image') {
     return FALSE;
   }
 
@@ -271,12 +321,18 @@ function pi_import_tags($post, $vocab, $create = TRUE) {
  * Batch complete function. Let them know the results of the import.
  */
 function pi_import_batch_finished($success, $results, $ops) {
-  $message = t('!total posts checked. !imported posts were imported, !drafts posts were still in the draft state, and !duplicates posts have already been imported.', array(
-    '!total' => $results['total'],
-    '!imported' => $results['imported'],
-    '!drafts' => $results['drafts'],
-    '!duplicates' => $results['duplicates'],
-  ));
+  if (isset($results['total'])) {
+    $message = t('!total posts checked. !imported posts were imported, !drafts posts were still in the draft state, !non_sites were non-site posts, and !duplicates posts have already been imported.', array(
+      '!total' => $results['total'],
+      '!imported' => $results['imported'],
+      '!drafts' => $results['drafts'],
+      '!non_sites' => $results['non_site'],
+      '!duplicates' => $results['duplicates'],
+    ));
+  }
+  else {
+    $message = t('No posts were imported!');
+  }
   drupal_set_message($message);
   watchdog('Percolate Integration Import', $message);
 }
