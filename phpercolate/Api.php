@@ -1,5 +1,8 @@
 <?php
 
+// Service IDs used in arguments. Undocumented.
+define('PERCOLATE_SERVICE_ID_PUBLIC', 12);
+
 require_once dirname(__FILE__) . '/Exception.php';
 
 class PercolateApi {

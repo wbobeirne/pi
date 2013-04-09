@@ -4,7 +4,7 @@ define('PI_IMPORT_TYPE_USER', 1);
 define('PI_IMPORT_TYPE_GROUP', 2);
 define('PI_IMPORT_SETTINGS', 'pi_import_defaults');
 define('PI_IMPORT_DEFAULT_FREQUENCY', 3600);
-define('PI_IMPORT_POST_LIMIT', 20);
+define('PI_IMPORT_POST_LIMIT', 10);
 
 include_once('pi_import.admin.inc');
 
@@ -121,18 +121,20 @@ function pi_import_get_posts($type, $id, $limit = 20, $offset = 0) {
   $posts = array();
   $api =  pi_build_api();
   try {
+    $options = array(
+      'limit' => $limit,
+      'offset' => $offset,
+      'service_ids' => PERCOLATE_SERVICE_ID_PUBLIC,
+      'statuses' => 'published',
+    );
     if ($type == PI_IMPORT_TYPE_USER) {
-      $posts = $api->getUserPosts($id, array(
-        'limit' => $limit,
-        'offset' => $offset,
-      ));
+      $posts = $api->getUserPosts($id, $options);
     }
     else {
-      $posts = $api->getGroupPosts($id, array(
-        'limit' => $limit,
-        'offset' => $offset,
-      ));
+      $posts = $api->getGroupPosts($id, $options);
     }
+
+    return $posts['data'];
   }
   catch (PercolateException $e) {
     $code = $e->getCode();
@@ -157,8 +159,6 @@ function pi_import_get_posts($type, $id, $limit = 20, $offset = 0) {
 
     return array();
   }
-
-  return $posts['data'];
 }
 
 
@@ -171,25 +171,11 @@ function pi_import_import_post($post, $settings, &$context = array()) {
   if (empty($context['results'])) {
     $context['results'] = array(
       'imported' => 0,
-      'drafts' => 0,
       'duplicates' => 0,
-      'non_site' => 0,
       'total' => 0,
     );
   }
   $context['results']['total']++;
-
-  // Don't import draft posts.
-  if (!isset($post['published_to']['public'])) {
-    $context['results']['drafts']++;
-    return FALSE;
-  }
-
-  // Don't import posts that aren't meant for sites.
-  if (!$post['published_to']['public'] || empty($post['title'])) {
-    $context['results']['non_site']++;
-    return FALSE;
-  }
 
   // Don't import duplicates, unless deleted and configured that way.
   if ($post_mapping = pi_get_mappings_by_post($post['id'], 'node')) {
@@ -210,7 +196,7 @@ function pi_import_import_post($post, $settings, &$context = array()) {
   
   // Initialize new node.
   $node = new stdClass();
-  $node->title = $post['title'];
+  $node->title = empty($post['title']) ? 'Untitled' : $post['title'];
   $node->type = $settings['content_type'];
   node_object_prepare($node);
   $node->language = LANGUAGE_NONE;
@@ -322,18 +308,16 @@ function pi_import_tags($post, $vocab, $create = TRUE) {
  */
 function pi_import_batch_finished($success, $results, $ops) {
   if (isset($results['total'])) {
-    $message = t('!total posts checked. !imported posts were imported, !drafts posts were still in the draft state, !non_sites were non-site posts, and !duplicates posts have already been imported.', array(
+    $message = t('!total posts checked. !imported posts were imported and !duplicates posts had already been imported.', array(
       '!total' => $results['total'],
       '!imported' => $results['imported'],
-      '!drafts' => $results['drafts'],
-      '!non_sites' => $results['non_site'],
       '!duplicates' => $results['duplicates'],
     ));
   }
   else {
-    $message = t('No posts were imported!');
+    $message = t('No posts were imported.');
   }
-  drupal_set_message($message);
+  drupal_set_message('Import successful! ' . $results['imported'] . ' nodes created.');
   watchdog('Percolate Integration Import', $message);
 }
 
